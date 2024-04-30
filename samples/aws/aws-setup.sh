@@ -13,14 +13,10 @@ if [ -z "${CLUSTER_NAME}" ]; then
   exit 0
 fi
 
-
-k3d cluster create mycluster
-
-export AWS_REGION=us-east-1 # This is used to help encode your environment variables
+export AWS_REGION=us-east-2 # This is used to help encode your environment variables
 export AWS_SSH_KEY_NAME=default
-# Select instance types
-export AWS_CONTROL_PLANE_MACHINE_TYPE=t3.large
-export AWS_NODE_MACHINE_TYPE=t3.large
+export AWS_CONTROL_PLANE_MACHINE_TYPE=t2.medium
+export AWS_NODE_MACHINE_TYPE=t2.medium
 export EXP_CLUSTER_RESOURCE_SET=true
 
 export PWD="$(pwd)"
@@ -50,10 +46,7 @@ kubectl create configmap aws-ebs-csi-driver-addon --from-file=samples/aws/aws-cs
 kubectl apply -f samples/aws/k3s-cluster.yaml
 kubectl apply -f samples/aws/resource-set.yaml
 
-
-echo ""
-echo "Waiting on Cluster $CLUSTER_NAME to be provisioned, then applying elb healthcheck workaround..."
+printf "\nWaiting on Cluster $CLUSTER_NAME to be provisioned, then applying elb healthcheck workaround..."
 until kubectl get awsclusters/$CLUSTER_NAME --output=jsonpath='{.status.ready}' | grep "true"; do : ; done
 aws elb configure-health-check --load-balancer-name $CLUSTER_NAME-apiserver --health-check Target=TCP:6443,Interval=30,UnhealthyThreshold=2,HealthyThreshold=2,Timeout=3 > /dev/null
-echo ""
-echo "Once the cluster is up run clusterctl get kubeconfig $CLUSTER_NAME > k3s.yaml or kubectl scale kthreescontrolplane $CLUSTER_NAME-control-plane --replicas 3 for HA"
+printf "\nOnce the cluster is up run clusterctl get kubeconfig $CLUSTER_NAME > k3s.yaml or kubectl scale kthreescontrolplane $CLUSTER_NAME-control-plane --replicas 3 for HA"
