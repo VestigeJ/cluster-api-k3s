@@ -19,10 +19,10 @@ package controllers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,23 +32,24 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/external"
 	"sigs.k8s.io/cluster-api/util"
+	"sigs.k8s.io/cluster-api/util/collections"
 	"sigs.k8s.io/cluster-api/util/conditions"
+	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	bootstrapv1 "github.com/k3s-io/cluster-api-k3s/bootstrap/api/v1beta1"
-	controlplanev1 "github.com/k3s-io/cluster-api-k3s/controlplane/api/v1beta1"
+	bootstrapv1 "github.com/k3s-io/cluster-api-k3s/bootstrap/api/v1beta2"
+	controlplanev1 "github.com/k3s-io/cluster-api-k3s/controlplane/api/v1beta2"
 	k3s "github.com/k3s-io/cluster-api-k3s/pkg/k3s"
-	"github.com/k3s-io/cluster-api-k3s/pkg/machinefilters"
 )
 
 var ErrPreConditionFailed = errors.New("precondition check failed")
 
 func (r *KThreesControlPlaneReconciler) initializeControlPlane(ctx context.Context, cluster *clusterv1.Cluster, kcp *controlplanev1.KThreesControlPlane, controlPlane *k3s.ControlPlane) (ctrl.Result, error) {
-	logger := controlPlane.Logger()
+	logger := ctrl.LoggerFrom(ctx)
 
 	// Perform an uncached read of all the owned machines. This check is in place to make sure
 	// that the controller cache is not misbehaving and we end up initializing the cluster more than once.
-	ownedMachines, err := r.managementClusterUncached.GetMachinesForCluster(ctx, util.ObjectKey(cluster), machinefilters.OwnedMachines(kcp))
+	ownedMachines, err := r.managementClusterUncached.GetMachinesForCluster(ctx, util.ObjectKey(cluster), collections.OwnedMachines(kcp))
 	if err != nil {
 		logger.Error(err, "failed to perform an uncached read of control plane machines for cluster")
 		return ctrl.Result{}, err
@@ -61,7 +62,7 @@ func (r *KThreesControlPlaneReconciler) initializeControlPlane(ctx context.Conte
 	}
 
 	bootstrapSpec := controlPlane.InitialControlPlaneConfig()
-	fd := controlPlane.NextFailureDomainForScaleUp()
+	fd := controlPlane.NextFailureDomainForScaleUp(ctx)
 	if err := r.cloneConfigsAndGenerateMachine(ctx, cluster, kcp, bootstrapSpec, fd); err != nil {
 		logger.Error(err, "Failed to create initial control plane Machine")
 		r.recorder.Eventf(kcp, corev1.EventTypeWarning, "FailedInitialization", "Failed to create initial control plane Machine for cluster %s/%s control plane: %v", cluster.Namespace, cluster.Name, err)
@@ -73,7 +74,7 @@ func (r *KThreesControlPlaneReconciler) initializeControlPlane(ctx context.Conte
 }
 
 func (r *KThreesControlPlaneReconciler) scaleUpControlPlane(ctx context.Context, cluster *clusterv1.Cluster, kcp *controlplanev1.KThreesControlPlane, controlPlane *k3s.ControlPlane) (ctrl.Result, error) {
-	logger := controlPlane.Logger()
+	logger := ctrl.LoggerFrom(ctx)
 
 	// Run preflight checks to ensure that the control plane is stable before proceeding with a scale up/scale down operation; if not, wait.
 	if result, err := r.preflightChecks(ctx, controlPlane); err != nil || !result.IsZero() {
@@ -82,7 +83,7 @@ func (r *KThreesControlPlaneReconciler) scaleUpControlPlane(ctx context.Context,
 
 	// Create the bootstrap configuration
 	bootstrapSpec := controlPlane.JoinControlPlaneConfig()
-	fd := controlPlane.NextFailureDomainForScaleUp()
+	fd := controlPlane.NextFailureDomainForScaleUp(ctx)
 	if err := r.cloneConfigsAndGenerateMachine(ctx, cluster, kcp, bootstrapSpec, fd); err != nil {
 		logger.Error(err, "Failed to create additional control plane Machine")
 		r.recorder.Eventf(kcp, corev1.EventTypeWarning, "FailedScaleUp", "Failed to create additional control plane Machine for cluster %s/%s control plane: %v", cluster.Namespace, cluster.Name, err)
@@ -98,12 +99,12 @@ func (r *KThreesControlPlaneReconciler) scaleDownControlPlane(
 	cluster *clusterv1.Cluster,
 	kcp *controlplanev1.KThreesControlPlane,
 	controlPlane *k3s.ControlPlane,
-	outdatedMachines k3s.FilterableMachineCollection,
+	outdatedMachines collections.Machines,
 ) (ctrl.Result, error) {
-	logger := controlPlane.Logger()
+	logger := ctrl.LoggerFrom(ctx)
 
 	// Pick the Machine that we should scale down.
-	machineToDelete, err := selectMachineForScaleDown(controlPlane, outdatedMachines)
+	machineToDelete, err := selectMachineForScaleDown(ctx, controlPlane, outdatedMachines)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to select machine for scale down: %w", err)
 	}
@@ -132,12 +133,19 @@ func (r *KThreesControlPlaneReconciler) scaleDownControlPlane(
 			logger.Error(err, "Failed to move leadership to candidate machine", "candidate", etcdLeaderCandidate.Name)
 			return ctrl.Result{}, err
 		}
-		logger.Info("etcd move etcd leader succeeded, node to delete %s", machineToDelete.Status.NodeRef.Name)
-		if err := workloadCluster.RemoveEtcdMemberForMachine(ctx, machineToDelete); err != nil {
-			logger.Error(err, "Failed to remove etcd member for machine")
-			return ctrl.Result{}, err
+
+		patchHelper, err := patch.NewHelper(machineToDelete, r.Client)
+		if err != nil {
+			return ctrl.Result{}, errors.Wrapf(err, "failed to create patch helper for machine")
 		}
-		logger.Info("etcd remove etcd member succeeded, node to delete %s", machineToDelete.Status.NodeRef.Name)
+
+		mAnnotations := machineToDelete.GetAnnotations()
+		mAnnotations[clusterv1.PreTerminateDeleteHookAnnotationPrefix] = k3sHookName
+		machineToDelete.SetAnnotations(mAnnotations)
+
+		if err := patchHelper.Patch(ctx, machineToDelete); err != nil {
+			return ctrl.Result{}, errors.Wrapf(err, "failed patch machine for adding preTerminate hook")
+		}
 	}
 
 	logger = logger.WithValues("machine", machineToDelete)
@@ -171,12 +179,18 @@ func (r *KThreesControlPlaneReconciler) preflightChecks(_ context.Context, contr
 
 	// If there are deleting machines, wait for the operation to complete.
 	if controlPlane.HasDeletingMachine() {
-		logger.Info("Waiting for machines to be deleted", "Machines", strings.Join(controlPlane.Machines.Filter(machinefilters.HasDeletionTimestamp).Names(), ", "))
+		logger.Info("Waiting for machines to be deleted", "Machines", strings.Join(controlPlane.Machines.Filter(collections.HasDeletionTimestamp).Names(), ", "))
 		return ctrl.Result{RequeueAfter: deleteRequeueAfter}, nil
 	}
 
 	// Check machine health conditions; if there are conditions with False or Unknown, then wait.
 	allMachineHealthConditions := []clusterv1.ConditionType{controlplanev1.MachineAgentHealthyCondition}
+	if controlPlane.IsEtcdManaged() {
+		allMachineHealthConditions = append(allMachineHealthConditions,
+			controlplanev1.MachineEtcdMemberHealthyCondition,
+		)
+	}
+
 	machineErrors := []error{}
 
 loopmachines:
@@ -223,7 +237,7 @@ func preflightCheckCondition(kind string, obj conditions.Getter, condition clust
 	return nil
 }
 
-func selectMachineForScaleDown(controlPlane *k3s.ControlPlane, outdatedMachines k3s.FilterableMachineCollection) (*clusterv1.Machine, error) {
+func selectMachineForScaleDown(ctx context.Context, controlPlane *k3s.ControlPlane, outdatedMachines collections.Machines) (*clusterv1.Machine, error) {
 	machines := controlPlane.Machines
 	switch {
 	case controlPlane.MachineWithDeleteAnnotation(outdatedMachines).Len() > 0:
@@ -233,7 +247,7 @@ func selectMachineForScaleDown(controlPlane *k3s.ControlPlane, outdatedMachines 
 	case outdatedMachines.Len() > 0:
 		machines = outdatedMachines
 	}
-	return controlPlane.MachineInFailureDomainWithMostMachines(machines)
+	return controlPlane.MachineInFailureDomainWithMostMachines(ctx, machines)
 }
 
 func (r *KThreesControlPlaneReconciler) cloneConfigsAndGenerateMachine(ctx context.Context, cluster *clusterv1.Cluster, kcp *controlplanev1.KThreesControlPlane, bootstrapSpec *bootstrapv1.KThreesConfigSpec, failureDomain *string) error {
@@ -251,7 +265,7 @@ func (r *KThreesControlPlaneReconciler) cloneConfigsAndGenerateMachine(ctx conte
 	// Clone the infrastructure template
 	infraRef, err := external.CreateFromTemplate(ctx, &external.CreateFromTemplateInput{
 		Client:      r.Client,
-		TemplateRef: &kcp.Spec.InfrastructureTemplate,
+		TemplateRef: &kcp.Spec.MachineTemplate.InfrastructureRef,
 		Namespace:   kcp.Namespace,
 		OwnerRef:    infraCloneOwner,
 		ClusterName: cluster.Name,
@@ -358,10 +372,14 @@ func (r *KThreesControlPlaneReconciler) generateMachine(ctx context.Context, kcp
 			Bootstrap: clusterv1.Bootstrap{
 				ConfigRef: bootstrapRef,
 			},
-			FailureDomain:    failureDomain,
-			NodeDrainTimeout: kcp.Spec.NodeDrainTimeout,
+			FailureDomain:           failureDomain,
+			NodeDrainTimeout:        kcp.Spec.MachineTemplate.NodeDrainTimeout,
+			NodeVolumeDetachTimeout: kcp.Spec.MachineTemplate.NodeVolumeDetachTimeout,
+			NodeDeletionTimeout:     kcp.Spec.MachineTemplate.NodeDeletionTimeout,
 		},
 	}
+
+	annotations := map[string]string{}
 
 	// Machine's bootstrap config may be missing ClusterConfiguration if it is not the first machine in the control plane.
 	// We store ClusterConfiguration as annotation here to detect any changes in KCP ClusterConfiguration and rollout the machine if any.
@@ -369,10 +387,23 @@ func (r *KThreesControlPlaneReconciler) generateMachine(ctx context.Context, kcp
 	if err != nil {
 		return fmt.Errorf("failed to marshal cluster configuration: %w", err)
 	}
-	machine.SetAnnotations(map[string]string{controlplanev1.KThreesServerConfigurationAnnotation: string(serverConfig)})
+	annotations[controlplanev1.KThreesServerConfigurationAnnotation] = string(serverConfig)
+
+	// In case this machine is being created as a consequence of a remediation, then add an annotation
+	// tracking remediating data.
+	// NOTE: This is required in order to track remediation retries.
+	if remediationData, ok := kcp.Annotations[controlplanev1.RemediationInProgressAnnotation]; ok {
+		annotations[controlplanev1.RemediationForAnnotation] = remediationData
+	}
+
+	machine.SetAnnotations(annotations)
 
 	if err := r.Client.Create(ctx, machine); err != nil {
 		return fmt.Errorf("failed to create machine: %w", err)
 	}
+
+	// Remove the annotation tracking that a remediation is in progress (the remediation completed when
+	// the replacement machine has been created above).
+	delete(kcp.Annotations, controlplanev1.RemediationInProgressAnnotation)
 	return nil
 }
