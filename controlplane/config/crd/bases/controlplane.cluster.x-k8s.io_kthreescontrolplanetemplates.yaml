@@ -63,9 +63,15 @@ spec:
                                 description: |-
                                   AirGapped is a boolean value to define if the bootstrapping should be air-gapped,
                                   basically supposing that online container registries and k3s install scripts are not reachable.
-                                  User should prepare docker image, k3s binary, and put the install script in `/opt/install.sh`
+                                  User should prepare docker image, k3s binary, and put the install script in AirGappedInstallScriptPath (default path: "/opt/install.sh")
                                   on all nodes in the air-gap environment.
                                 type: boolean
+                              airGappedInstallScriptPath:
+                                description: |-
+                                  AirGappedInstallScriptPath is the path to the install script in the air-gapped environment.
+                                  The install script should be prepared by the user. The value is only
+                                  used when AirGapped is set to true (default: "/opt/install.sh").
+                                type: string
                               kubeProxyArgs:
                                 description: KubeProxyArgs Customized flag for kube-proxy
                                   process
@@ -188,7 +194,6 @@ spec:
                                   0.0.0.0)'
                                 type: string
                               cloudProviderName:
-                                default: external
                                 description: 'CloudProviderName defines the --cloud-provider=
                                   kubelet extra arg. (default: "external")'
                                 type: string
@@ -205,7 +210,6 @@ spec:
                                   "cluster.local")'
                                 type: string
                               disableCloudController:
-                                default: true
                                 description: 'DisableCloudController disables k3s
                                   default cloud controller manager. (default: true)'
                                 type: boolean
@@ -220,6 +224,11 @@ spec:
                                   suppresses the ''cloud-provider=external'' kubelet
                                   argument. (default: false)'
                                 type: boolean
+                              etcdProxyImage:
+                                description: 'Customized etcd proxy image for management
+                                  cluster to communicate with workload cluster etcd
+                                  (default: "alpine/socat")'
+                                type: string
                               httpsListenPort:
                                 description: 'HTTPSListenPort HTTPS listen port (default:
                                   6443)'
@@ -245,6 +254,10 @@ spec:
                               serviceCidr:
                                 description: 'ServiceCidr Network CIDR to use for
                                   services IPs (default: "10.43.0.0/16")'
+                                type: string
+                              systemDefaultRegistry:
+                                description: SystemDefaultRegistry defines private
+                                  registry to be used for all system images
                                 type: string
                               tlsSan:
                                 description: TLSSan Add additional hostname or IP

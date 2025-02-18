@@ -20,7 +20,7 @@ SHELL:=/usr/bin/env bash
 
 .DEFAULT_GOAL:=help
 
-GO_VERSION ?= 1.21.9
+GO_VERSION ?= 1.22.5
 GO_CONTAINER_IMAGE ?= docker.io/library/golang:$(GO_VERSION)
 
 ARCH ?= $(shell go env GOARCH)
@@ -79,7 +79,7 @@ ENVSUBST_BIN := envsubst
 ENVSUBST := $(TOOLS_BIN_DIR)/$(ENVSUBST_BIN)
 
 # Bump as necessary/desired to latest that supports our version of go at https://github.com/golangci/golangci-lint/releases
-GOLANGCI_LINT_VER := v1.55.2
+GOLANGCI_LINT_VER := v1.57.2
 GOLANGCI_LINT_BIN := golangci-lint
 GOLANGCI_LINT := $(TOOLS_BIN_DIR)/$(GOLANGCI_LINT_BIN)-$(GOLANGCI_LINT_VER)
 
@@ -218,6 +218,8 @@ all-controlplane: manager-controlplane
 test-controlplane: envtest generate-controlplane generate-controlplane-conversions lint manifests-controlplane
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(TOOLS_BIN_DIR) -p path)" go test $(shell pwd)/controlplane/... -coverprofile cover.out
 
+DOCKER_TEMPLATES := test/e2e/data/infrastructure-docker
+
 .PHONY: docker-build-e2e
 docker-build-e2e: ## Run docker-build-* targets for all the images with settings to be used for the e2e tests
     # please ensure the generated image name matches image names used in the E2E_CONF_FILE
@@ -225,8 +227,16 @@ docker-build-e2e: ## Run docker-build-* targets for all the images with settings
 	$(MAKE) BOOTSTRAP_IMG_TAG=dev docker-build-bootstrap
 	$(MAKE) CONTROLPLANE_IMG_TAG=dev docker-build-controlplane
 
+.PHONY: generate-e2e-templates
+generate-e2e-templates: $(KUSTOMIZE)
+	$(KUSTOMIZE) build $(DOCKER_TEMPLATES)/cluster-template --load-restrictor LoadRestrictionsNone > $(DOCKER_TEMPLATES)/cluster-template.yaml
+	$(KUSTOMIZE) build $(DOCKER_TEMPLATES)/cluster-template-v1beta1 --load-restrictor LoadRestrictionsNone > $(DOCKER_TEMPLATES)/cluster-template-v1beta1.yaml
+	$(KUSTOMIZE) build $(DOCKER_TEMPLATES)/cluster-template-kcp-remediation --load-restrictor LoadRestrictionsNone > $(DOCKER_TEMPLATES)/cluster-template-kcp-remediation.yaml
+	$(KUSTOMIZE) build $(DOCKER_TEMPLATES)/cluster-template-md-remediation --load-restrictor LoadRestrictionsNone > $(DOCKER_TEMPLATES)/cluster-template-md-remediation.yaml
+	$(KUSTOMIZE) build $(DOCKER_TEMPLATES)/cluster-template-topology --load-restrictor LoadRestrictionsNone > $(DOCKER_TEMPLATES)/cluster-template-topology.yaml
+
 .PHONY: test-e2e
-test-e2e: $(GINKGO) $(KUSTOMIZE) ## Run the end-to-end tests
+test-e2e: generate-e2e-templates $(GINKGO) $(KUSTOMIZE) ## Run the end-to-end tests
 	CAPI_KUSTOMIZE_PATH="$(KUSTOMIZE)" $(GINKGO) -v --trace -poll-progress-after=$(GINKGO_POLL_PROGRESS_AFTER) \
 		-poll-progress-interval=$(GINKGO_POLL_PROGRESS_INTERVAL) --tags=e2e --focus="$(GINKGO_FOCUS)" \
 		$(_SKIP_ARGS) --nodes=$(GINKGO_NODES) --timeout=$(GINKGO_TIMEOUT) --no-color=$(GINKGO_NOCOLOR) \

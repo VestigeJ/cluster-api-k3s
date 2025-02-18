@@ -31,5 +31,11 @@ const (
 	// dependent certificates have been created.
 	dependentCertRequeueAfter = 30 * time.Second
 
+	// etcdRemovalRequeueAfter is how long to wait before checking again to see if
+	// etcd member is successfully removed.
+	etcdRemovalRequeueAfter = 30 * time.Second
+
 	k3sHookName = "k3s"
+
+	kcpManagerName = "capi-kthreescontrolplane"
 )

@@ -25,6 +25,7 @@ type K3sServerConfig struct {
 	ClusterDomain             string   `json:"cluster-domain,omitempty"`
 	DisableComponents         []string `json:"disable,omitempty"`
 	ClusterInit               bool     `json:"cluster-init,omitempty"`
+	SystemDefaultRegistry     string   `json:"system-default-registry,omitempty"`
 	K3sAgentConfig            `json:",inline"`
 }
 
@@ -42,7 +43,7 @@ type K3sAgentConfig struct {
 func GenerateInitControlPlaneConfig(controlPlaneEndpoint string, token string, serverConfig bootstrapv1.KThreesServerConfig, agentConfig bootstrapv1.KThreesAgentConfig) K3sServerConfig {
 	kubeletExtraArgs := getKubeletExtraArgs(serverConfig)
 	k3sServerConfig := K3sServerConfig{
-		DisableCloudController:    serverConfig.DisableCloudController,
+		DisableCloudController:    getDisableCloudController(serverConfig),
 		ClusterInit:               true,
 		KubeAPIServerArgs:         append(serverConfig.KubeAPIServerArgs, "anonymous-auth=true", getTLSCipherSuiteArg()),
 		TLSSan:                    append(serverConfig.TLSSan, controlPlaneEndpoint),
@@ -57,6 +58,7 @@ func GenerateInitControlPlaneConfig(controlPlaneEndpoint string, token string, s
 		ClusterDNS:                serverConfig.ClusterDNS,
 		ClusterDomain:             serverConfig.ClusterDomain,
 		DisableComponents:         serverConfig.DisableComponents,
+		SystemDefaultRegistry:     serverConfig.SystemDefaultRegistry,
 	}
 
 	k3sServerConfig.K3sAgentConfig = K3sAgentConfig{
@@ -75,7 +77,7 @@ func GenerateInitControlPlaneConfig(controlPlaneEndpoint string, token string, s
 func GenerateJoinControlPlaneConfig(serverURL string, token string, controlplaneendpoint string, serverConfig bootstrapv1.KThreesServerConfig, agentConfig bootstrapv1.KThreesAgentConfig) K3sServerConfig {
 	kubeletExtraArgs := getKubeletExtraArgs(serverConfig)
 	k3sServerConfig := K3sServerConfig{
-		DisableCloudController:    serverConfig.DisableCloudController,
+		DisableCloudController:    getDisableCloudController(serverConfig),
 		KubeAPIServerArgs:         append(serverConfig.KubeAPIServerArgs, "anonymous-auth=true", getTLSCipherSuiteArg()),
 		TLSSan:                    append(serverConfig.TLSSan, controlplaneendpoint),
 		KubeControllerManagerArgs: append(serverConfig.KubeControllerManagerArgs, kubeletExtraArgs...),
@@ -89,6 +91,7 @@ func GenerateJoinControlPlaneConfig(serverURL string, token string, controlplane
 		ClusterDNS:                serverConfig.ClusterDNS,
 		ClusterDomain:             serverConfig.ClusterDomain,
 		DisableComponents:         serverConfig.DisableComponents,
+		SystemDefaultRegistry:     serverConfig.SystemDefaultRegistry,
 	}
 
 	k3sServerConfig.K3sAgentConfig = K3sAgentConfig{
@@ -158,9 +161,16 @@ func getTLSCipherSuiteArg() string {
 
 func getKubeletExtraArgs(serverConfig bootstrapv1.KThreesServerConfig) []string {
 	kubeletExtraArgs := []string{}
-	if len(serverConfig.CloudProviderName) > 0 {
-		cloudProviderArg := fmt.Sprintf("cloud-provider=%s", serverConfig.CloudProviderName)
+	if serverConfig.CloudProviderName != nil && len(*serverConfig.CloudProviderName) > 0 {
+		cloudProviderArg := fmt.Sprintf("cloud-provider=%s", *serverConfig.CloudProviderName)
 		kubeletExtraArgs = append(kubeletExtraArgs, cloudProviderArg)
 	}
 	return kubeletExtraArgs
+}
+
+func getDisableCloudController(serverConfig bootstrapv1.KThreesServerConfig) bool {
+	if serverConfig.DisableCloudController == nil {
+		return true
+	}
+	return *serverConfig.DisableCloudController
 }

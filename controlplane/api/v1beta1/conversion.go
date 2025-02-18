@@ -71,6 +71,10 @@ func Convert_v1beta2_KThreesConfigSpec_To_v1beta1_KThreesConfigSpec(in *bootstra
 	return bootstrapv1beta1.Convert_v1beta2_KThreesConfigSpec_To_v1beta1_KThreesConfigSpec(in, out, s)
 }
 
+func Convert_v1beta2_KThreesControlPlaneStatus_To_v1beta1_KThreesControlPlaneStatus(in *controlplanev1beta2.KThreesControlPlaneStatus, out *KThreesControlPlaneStatus, s conversion.Scope) error { //nolint: stylecheck
+	return autoConvert_v1beta2_KThreesControlPlaneStatus_To_v1beta1_KThreesControlPlaneStatus(in, out, s)
+}
+
 // ConvertTo converts the v1beta1 KThreesControlPlane receiver to a v1beta2 KThreesControlPlane.
 func (in *KThreesControlPlane) ConvertTo(dstRaw ctrlconversion.Hub) error {
 	dst := dstRaw.(*controlplanev1beta2.KThreesControlPlane)
@@ -89,8 +93,12 @@ func (in *KThreesControlPlane) ConvertTo(dstRaw ctrlconversion.Hub) error {
 	dst.Spec.KThreesConfigSpec.ServerConfig.CloudProviderName = restored.Spec.KThreesConfigSpec.ServerConfig.CloudProviderName
 	dst.Spec.KThreesConfigSpec.ServerConfig.DeprecatedDisableExternalCloudProvider = restored.Spec.KThreesConfigSpec.ServerConfig.DeprecatedDisableExternalCloudProvider
 	dst.Spec.KThreesConfigSpec.ServerConfig.DisableCloudController = restored.Spec.KThreesConfigSpec.ServerConfig.DisableCloudController
+	dst.Spec.KThreesConfigSpec.ServerConfig.SystemDefaultRegistry = restored.Spec.KThreesConfigSpec.ServerConfig.SystemDefaultRegistry
+	dst.Spec.KThreesConfigSpec.ServerConfig.EtcdProxyImage = restored.Spec.KThreesConfigSpec.ServerConfig.EtcdProxyImage
 	dst.Spec.MachineTemplate.NodeVolumeDetachTimeout = restored.Spec.MachineTemplate.NodeVolumeDetachTimeout
 	dst.Spec.MachineTemplate.NodeDeletionTimeout = restored.Spec.MachineTemplate.NodeDeletionTimeout
+	dst.Status.Version = restored.Status.Version
+	dst.Spec.KThreesConfigSpec.AgentConfig.AirGappedInstallScriptPath = restored.Spec.KThreesConfigSpec.AgentConfig.AirGappedInstallScriptPath
 	return nil
 }
 

@@ -115,13 +115,19 @@ type KThreesServerConfig struct {
 
 	// DisableCloudController disables k3s default cloud controller manager. (default: true)
 	// +optional
-	// +kubebuilder:default=true
-	DisableCloudController bool `json:"disableCloudController,omitempty"`
+	DisableCloudController *bool `json:"disableCloudController,omitempty"`
 
 	// CloudProviderName defines the --cloud-provider= kubelet extra arg. (default: "external")
 	// +optional
-	// +kubebuilder:default=external
-	CloudProviderName string `json:"cloudProviderName,omitempty"`
+	CloudProviderName *string `json:"cloudProviderName,omitempty"`
+
+	// SystemDefaultRegistry defines private registry to be used for all system images
+	// +optional
+	SystemDefaultRegistry string `json:"systemDefaultRegistry,omitempty"`
+
+	// Customized etcd proxy image for management cluster to communicate with workload cluster etcd (default: "alpine/socat")
+	// +optional
+	EtcdProxyImage string `json:"etcdProxyImage,omitempty"`
 }
 
 type KThreesAgentConfig struct {
@@ -152,10 +158,16 @@ type KThreesAgentConfig struct {
 
 	// AirGapped is a boolean value to define if the bootstrapping should be air-gapped,
 	// basically supposing that online container registries and k3s install scripts are not reachable.
-	// User should prepare docker image, k3s binary, and put the install script in `/opt/install.sh`
+	// User should prepare docker image, k3s binary, and put the install script in AirGappedInstallScriptPath (default path: "/opt/install.sh")
 	// on all nodes in the air-gap environment.
 	// +optional
 	AirGapped bool `json:"airGapped,omitempty"`
+
+	// AirGappedInstallScriptPath is the path to the install script in the air-gapped environment.
+	// The install script should be prepared by the user. The value is only
+	// used when AirGapped is set to true (default: "/opt/install.sh").
+	// +optional
+	AirGappedInstallScriptPath string `json:"airGappedInstallScriptPath,omitempty"`
 }
 
 // KThreesConfigStatus defines the observed state of KThreesConfig.
